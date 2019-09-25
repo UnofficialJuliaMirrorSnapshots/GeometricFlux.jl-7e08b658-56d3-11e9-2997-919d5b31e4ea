@@ -87,15 +87,12 @@ for op = [:add, :sub, :max, :min, :mul, :div]
         Threads.@threads for num = 1:l*s
             li = (num -1) ÷ s + 1
             i = (num - 1) % s + 1
-            @inbounds ind = Tuple(CartesianIndices(xs)[li])
+            @inbounds ind = CartesianIndices(xs)[li]
             @inbounds $(Symbol("atomic_", op, "!"))(
                 pointer(ys,
-                        Base._to_linear_index(ys,
-                                              i,
-                                              xs[li]
-                                              )
+                        Base._to_linear_index(ys, i, xs[li])
                         ),
-                us[i, ind...]
+                us[i, ind]
             )
         end
 
@@ -109,15 +106,12 @@ for op = [:add, :sub, :max, :min, :mul, :div]
         Threads.@threads for num = 1:l*s
             li = (num -1) ÷ s + 1
             i = (num - 1) % s + 1
-            @inbounds ind = Tuple(CartesianIndices(xs)[li])
+            @inbounds ind = CartesianIndices(xs)[li]
             @inbounds $(Symbol("atomic_", op, "!"))(
                 pointer(ys,
-                        Base._to_linear_index(ys,
-                                              i,
-                                              xs[li]...
-                                              )
+                        Base._to_linear_index(ys, i, xs[li]...)
                         ),
-                us[i, ind...]
+                us[i, ind]
             )
         end
 
@@ -125,71 +119,71 @@ for op = [:add, :sub, :max, :min, :mul, :div]
     end
 end
 
-function scatter_mean!(ys::Matrix{T}, us::Array{T}, xs::Array{Int}) where T
-    l = length(xs)
-    s = size(ys, 1)
-    N = size(ys, 2)
-    Ns = [sum(xs .== i) for i = 1:N]
-    ys_ = fill!(similar(ys), 0)
+scatter_mean!(ys::Matrix{T}, us::Array{T}, xs::Array{Int}) where T = _scatter_mean!(ys, us, xs)
 
-    Threads.@threads for num = 1:l*s
-        li = (num -1) ÷ s + 1
-        i = (num - 1) % s + 1
-        @inbounds ind = Tuple(CartesianIndices(xs)[li])
-        @inbounds atomic_add!(
-            pointer(ys_, Base._to_linear_index(ys_, i, xs[li])),
-            us[i, ind...]
-        )
-    end
+scatter_mean!(ys::Array{T}, us::Array{T}, xs::Array{<:Tuple}) where T = _scatter_mean!(ys, us, xs)
 
-    Threads.@threads for i = 1:N
-        for j = 1:s
-            @inbounds atomic_div!(
-                pointer(ys_, Base._to_linear_index(ys_, j, i)),
-                T(Ns[i])
-            )
-            @inbounds atomic_add!(
-                pointer(ys, Base._to_linear_index(ys, j, i)),
-                ys_[j,i]
-            )
-        end
-    end
-
+function _scatter_mean!(ys::Array{T}, us::Array{T}, xs::Array) where T
+    Ns = zero(ys)
+    ys_ = zero(ys)
+    scatter_add!(Ns, one.(us), xs)
+    scatter_add!(ys_, us, xs)
+    ys .+= map((x,y) -> ifelse(iszero(y), x, x/y), ys_, Ns)
     return ys
 end
 
-# function scatter_mean!(ys::Array{T}, us::Array{T}, xs::Array{<:Tuple}) where T
-#     l = length(xs)
-#     s = size(ys, 1)
-#     N = length(Set(xs))
-#     Ns = [sum(xs .== i) for i = 1:N]
-#     ys_ = fill!(similar(ys), 0)
-#
-#     Threads.@threads for num = 1:l*s
-#         li = (num -1) ÷ s + 1
-#         i = (num - 1) % s + 1
-#         @inbounds ind = Tuple(CartesianIndices(xs)[li])
-#         @inbounds atomic_add!(
-#             pointer(ys_, Base._to_linear_index(ys_, i, xs[li]...)),
-#             us[i, ind...]
-#         )
-#     end
-#
-#     Threads.@threads for i = 1:N
-#         for j = 1:s
-#             @inbounds atomic_div!(
-#                 pointer(ys_, Base._to_linear_index(ys_, j, i)),
-#                 T(Ns[i])
-#             )
-#             @inbounds atomic_add!(
-#                 pointer(ys, Base._to_linear_index(ys, j, i)),
-#                 ys_[j,i]
-#             )
-#         end
-#     end
-#
-#     return ys
-# end
+@adjoint scatter_add!(ys, us, xs) = scatter_add!(data(ys), data(us), xs), Δ -> (Δ, gather(Δ, xs), nothing)
+@adjoint scatter_sub!(ys, us, xs) = scatter_sub!(data(ys), data(us), xs), Δ -> (Δ, -gather(Δ, xs), nothing)
+
+@adjoint function scatter_mul!(ys, us, xs)
+    scatter_mul!(data(ys), data(us), xs), function (Δ)
+        rev_xs = gather_indices(xs)
+        ∇us = gather(ys, xs) .* gather(Δ, xs)
+        @inbounds for ind = CartesianIndices(xs)
+            inds = filter(x -> x != ind, rev_xs[xs[ind]])
+            ∇us[:, ind] *= prod(data(us)[:, inds])
+        end
+        (scatter_mul!(Δ, data(us), xs), ∇us, nothing)
+    end
+end
+
+@adjoint function scatter_div!(ys, us, xs)
+    scatter_div!(data(ys), data(us), xs), function (Δ)
+        rev_xs = gather_indices(xs)
+        ∇us = - gather(ys, xs) .* gather(Δ, xs) ./ data(us).^2
+        @inbounds for ind = CartesianIndices(xs)
+            inds = filter(x -> x != ind, rev_xs[xs[ind]])
+            ∇us[:, ind] /= prod(data(us)[:, inds])
+        end
+        (scatter_div!(Δ, data(us), xs), ∇us, nothing)
+    end
+end
+
+function gather_indices(X::Array{T}) where T
+    Y = DefaultDict{T,Vector{CartesianIndex}}(CartesianIndex[])
+    @inbounds for (ind, val) = pairs(X)
+        push!(Y[val], ind)
+    end
+    Y
+end
+
+@adjoint function scatter_max!(ys, us, xs)
+   max = scatter_max!(data(ys), data(us), xs)
+   max, function (Δ)
+       Δy′ = (data(ys) .== max) .* data(Δ)
+       Δu′ = (data(us) .== gather(max, xs)) .* gather(data(Δ), xs)
+       return (Δy′, Δu′, nothing)
+   end
+end
+
+@adjoint function scatter_min!(ys, us, xs)
+   min = scatter_min!(data(ys), data(us), xs)
+   min, function (Δ)
+       Δy′ = (data(ys) .== min) .* data(Δ)
+       Δu′ = (data(us) .== gather(min, xs)) .* gather(data(Δ), xs)
+       return (Δy′, Δu′, nothing)
+   end
+end
 
 function scatter!(op::Symbol, ys::AbstractArray, us::AbstractArray, xs::AbstractArray)
     if op == :add
