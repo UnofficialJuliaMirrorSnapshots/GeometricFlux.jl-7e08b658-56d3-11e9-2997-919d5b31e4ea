@@ -7,6 +7,7 @@ using Statistics: mean
 using Flux
 using Flux: param, glorot_uniform, leakyrelu, GRUCell
 using Flux: @treelike
+using ZygoteRules
 using SparseArrays: SparseMatrixCSC
 using LinearAlgebra: I, issymmetric, diagm, eigmax
 
@@ -69,7 +70,10 @@ export
     scatter!,
 
     # graph/utils
-    adjlist
+    adjlist,
+
+    # utils
+    gather
 
 include("scatter.jl")
 include("layers/msgpass.jl")
@@ -77,6 +81,7 @@ include("layers/conv.jl")
 include("layers/pool.jl")
 include("models.jl")
 include("linalg.jl")
+include("utils.jl")
 
 
 function __init__()
