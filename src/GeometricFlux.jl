@@ -14,6 +14,7 @@ using SparseArrays: SparseMatrixCSC
 using LinearAlgebra: I, issymmetric, diagm, eigmax
 using DataStructures: DefaultDict
 
+import Base: identity
 import Base.Threads: atomictypes, llvmtypes, inttype, ArithmeticTypes, FloatTypes,
        atomic_cas!,
        atomic_xchg!,
@@ -26,9 +27,23 @@ import Flux: children
 
 export
 
+    # layers/meta
+    Meta,
+    adjlist,
+    update_edge,
+    update_vertex,
+    update_global,
+    aggregate_neighbors,
+    aggregate_edges,
+    aggregate_vertices,
+    all_vertices_data,
+    all_edges_data,
+    adjacent_vertices_data,
+    incident_edges_data,
+    propagate,
+
     # layers/msgpass
     MessagePassing,
-    neighboring,
 
     # layers/conv
     GCNConv,
@@ -77,7 +92,10 @@ export
     adjlist,
 
     # utils
-    gather
+    gather,
+    identity,
+    GraphInfo,
+    edge_index_table
 
 using CUDAapi
 if has_cuda()
@@ -95,12 +113,13 @@ end
 const IntOrTuple = Union{Integer,Tuple}
 
 include("scatter.jl")
+include("linalg.jl")
+include("utils.jl")
+include("layers/meta.jl")
 include("layers/msgpass.jl")
 include("layers/conv.jl")
 include("layers/pool.jl")
 include("models.jl")
-include("linalg.jl")
-include("utils.jl")
 
 
 function __init__()
