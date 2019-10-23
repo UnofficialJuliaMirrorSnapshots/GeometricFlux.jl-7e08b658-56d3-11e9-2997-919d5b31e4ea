@@ -25,8 +25,8 @@ update_vertex(m::T; kwargs...) where {T<:MessagePassing} = update(m; kwargs...)
 aggregate_neighbors(m::T, aggr::Symbol; kwargs...) where {T<:MessagePassing} =
     pool(aggr, kwargs[:cluster], kwargs[:M])
 
-function propagate(mp::T; aggr::Symbol=:add, kwargs...) where {T<:MessagePassing}
-    gi = GraphInfo(adjlist(mp))
+function propagate(mp::T; aggr::Symbol=:add, adjl=adjlist(mp), kwargs...) where {T<:MessagePassing}
+    gi = GraphInfo(adjl)
 
     # message function
     M = update_edge(mp; gi=gi, kwargs...)
@@ -37,14 +37,4 @@ function propagate(mp::T; aggr::Symbol=:add, kwargs...) where {T<:MessagePassing
     # update function
     Y = update_vertex(mp; M=M, kwargs...)
     return Y
-end
-
-function generate_cluster(M::AbstractMatrix, gi::GraphInfo)
-    cluster = similar(M, Int, gi.E)
-    @inbounds for i = 1:gi.V
-        j = gi.edge_idx[i]
-        k = gi.edge_idx[i+1]
-        cluster[j+1:k] .= i
-    end
-    cluster
 end
