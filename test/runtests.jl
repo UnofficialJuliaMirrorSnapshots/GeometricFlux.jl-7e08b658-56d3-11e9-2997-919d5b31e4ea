@@ -23,6 +23,7 @@ cuda_tests = [
     "cuda/pool",
     "cuda/grad",
     "cuda/conv",
+    "cuda/msgpass",
 ]
 
 tests = [
