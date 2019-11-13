@@ -41,6 +41,7 @@ tests = [
 ]
 
 if has_cuarrays()
+    using Flux: gpu
     append!(tests, cuda_tests)
 end
 

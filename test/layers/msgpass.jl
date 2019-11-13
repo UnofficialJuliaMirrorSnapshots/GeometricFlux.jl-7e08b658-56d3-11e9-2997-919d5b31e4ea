@@ -22,7 +22,7 @@ NewLayer(adjm::AbstractMatrix, m, n) = NewLayer(neighbors(adjm), randn(m,n))
 message(n::NewLayer; x_i=zeros(0), x_j=zeros(0)) = x_j
 update(::NewLayer; X=zeros(0), M=zeros(0)) = M
 
-X = rand(Float32, in_channel, N)
+X = Array(reshape(1:N*in_channel, in_channel, N))
 l = NewLayer(adj, in_channel, out_channel)
 
 message(n::NewLayer; x_i=zeros(0), x_j=zeros(0)) = n.weight' * x_j
